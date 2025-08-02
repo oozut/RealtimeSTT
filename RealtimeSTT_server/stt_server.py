@@ -64,6 +64,7 @@ stt-server [OPTIONS]
     - `--handle_buffer_overflow`: Handle buffer overflow during transcription.
     - `--suppress_tokens`: Suppress tokens during transcription.
     - `--allowed_latency_limit`: Allowed latency limit for real-time transcription.
+    - `--faster_whisper_vad_filter`: Enable VAD filter for Faster Whisper; default False.
 
 
 ### WebSocket Interface:
@@ -81,6 +82,7 @@ from datetime import datetime
 import logging
 import asyncio
 import pyaudio
+import base64
 import sys
 
 
@@ -185,6 +187,9 @@ allowed_parameters = [
     'recording_stop_time',
     'last_transcription_bytes',
     'last_transcription_bytes_b64',
+    'speech_end_silence_start',
+    'is_recording',
+    'use_wake_words',
 ]
 
 # Queues and connections for control and data
@@ -221,6 +226,23 @@ def debug_print(message):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         thread_name = threading.current_thread().name
         print(f"{Fore.CYAN}[DEBUG][{timestamp}][{thread_name}] {message}{Style.RESET_ALL}", file=sys.stderr)
+
+def format_timestamp_ns(timestamp_ns: int) -> str:
+    # Split into whole seconds and the nanosecond remainder
+    seconds = timestamp_ns // 1_000_000_000
+    remainder_ns = timestamp_ns % 1_000_000_000
+
+    # Convert seconds part into a datetime object (local time)
+    dt = datetime.fromtimestamp(seconds)
+
+    # Format the main time as HH:MM:SS
+    time_str = dt.strftime("%H:%M:%S")
+
+    # For instance, if you want milliseconds, divide the remainder by 1e6 and format as 3-digit
+    milliseconds = remainder_ns // 1_000_000
+    formatted_timestamp = f"{time_str}.{milliseconds:03d}"
+
+    return formatted_timestamp
 
 def text_detected(text, loop):
     global prev_text
@@ -290,14 +312,12 @@ def text_detected(text, loop):
         print(f"\r[{timestamp}] {bcolors.OKCYAN}{text}{bcolors.ENDC}", flush=True, end='')
 
 def on_recording_start(loop):
-    # Send a message to the client indicating recording has started
     message = json.dumps({
         'type': 'recording_start'
     })
     asyncio.run_coroutine_threadsafe(audio_queue.put(message), loop)
 
 def on_recording_stop(loop):
-    # Send a message to the client indicating recording has stopped
     message = json.dumps({
         'type': 'recording_stop'
     })
@@ -316,32 +336,45 @@ def on_vad_detect_stop(loop):
     asyncio.run_coroutine_threadsafe(audio_queue.put(message), loop)
 
 def on_wakeword_detected(loop):
-    # Send a message to the client when wake word detection starts
     message = json.dumps({
         'type': 'wakeword_detected'
     })
     asyncio.run_coroutine_threadsafe(audio_queue.put(message), loop)
 
 def on_wakeword_detection_start(loop):
-    # Send a message to the client when wake word detection starts
     message = json.dumps({
         'type': 'wakeword_detection_start'
     })
     asyncio.run_coroutine_threadsafe(audio_queue.put(message), loop)
 
 def on_wakeword_detection_end(loop):
-    # Send a message to the client when wake word detection ends
     message = json.dumps({
         'type': 'wakeword_detection_end'
     })
     asyncio.run_coroutine_threadsafe(audio_queue.put(message), loop)
 
-def on_transcription_start(loop):
-    # Send a message to the client when transcription starts
+def on_transcription_start(_audio_bytes, loop):
+    bytes_b64 = base64.b64encode(_audio_bytes.tobytes()).decode('utf-8')
     message = json.dumps({
-        'type': 'transcription_start'
+        'type': 'transcription_start',
+        'audio_bytes_base64': bytes_b64
     })
     asyncio.run_coroutine_threadsafe(audio_queue.put(message), loop)
+
+def on_turn_detection_start(loop):
+    print("&&& stt_server on_turn_detection_start")
+    message = json.dumps({
+        'type': 'start_turn_detection'
+    })
+    asyncio.run_coroutine_threadsafe(audio_queue.put(message), loop)
+
+def on_turn_detection_stop(loop):
+    print("&&& stt_server on_turn_detection_stop")
+    message = json.dumps({
+        'type': 'stop_turn_detection'
+    })
+    asyncio.run_coroutine_threadsafe(audio_queue.put(message), loop)
+
 
 # def on_realtime_transcription_update(text, loop):
 #     # Send real-time transcription updates to the client
@@ -390,6 +423,8 @@ def parse_arguments():
                         help='Specify the wake word(s) that will trigger the server to start listening. For example, setting this to "Jarvis" will make the system start transcribing when it detects the wake word "Jarvis". Default is "Jarvis".')
 
     parser.add_argument('-D', '--debug', action='store_true', help='Enable debug logging for detailed server operations')
+
+    parser.add_argument('--debug_websockets', action='store_true', help='Enable debug logging for detailed server websocket operations')
 
     parser.add_argument('-W', '--write', metavar='FILE', help='Save received audio to a WAV file')
     
@@ -460,8 +495,8 @@ def parse_arguments():
     parser.add_argument('--wake_word_timeout', type=float, default=5.0,
                         help='Maximum time in seconds that the system will wait for a wake word before timing out. After this timeout, the system stops listening for wake words until reactivated. Default is 5.0 seconds.')
 
-    parser.add_argument('--wake_word_activation_delay', type=float, default=20,
-                        help='The delay in seconds before the wake word detection is activated after the system starts listening. This prevents false positives during the start of a session. Default is 0.5 seconds.')
+    parser.add_argument('--wake_word_activation_delay', type=float, default=0,
+                        help='The delay in seconds before the wake word detection is activated after the system starts listening. This prevents false positives during the start of a session. Default is 0 seconds.')
 
     parser.add_argument('--wakeword_backend', type=str, default='none',
                         help='The backend used for wake word detection. You can specify different backends such as "default" or any custom implementations depending on your setup. Default is "pvporcupine".')
@@ -498,6 +533,9 @@ def parse_arguments():
     parser.add_argument('--allowed_latency_limit', type=int, default=100,
                         help='Maximal amount of chunks that can be unprocessed in queue before discarding chunks.. Default is 100.')
 
+    parser.add_argument('--faster_whisper_vad_filter', action='store_true',
+                        help='Enable VAD filter for Faster Whisper. Default is False.')
+
     parser.add_argument('--logchunks', action='store_true', help='Enable logging of incoming audio chunks (periods)')
 
     # Parse arguments
@@ -509,12 +547,17 @@ def parse_arguments():
     log_incoming_chunks = args.logchunks
     dynamic_silence_timing = args.silence_timing
 
-    if debug_logging:
-        loglevel = logging.DEBUG
-        logging.basicConfig(level=loglevel, format='[%(asctime)s] %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-    else:
-        loglevel = logging.WARNING
 
+    ws_logger = logging.getLogger('websockets')
+    if args.debug_websockets:
+        # If app debug is on, let websockets be verbose too
+        ws_logger.setLevel(logging.DEBUG)
+        # Ensure it uses the handler configured by basicConfig
+        ws_logger.propagate = False # Prevent duplicate messages if it also propagates to root
+    else:
+        # If app debug is off, silence websockets below WARNING
+        ws_logger.setLevel(logging.WARNING)
+        ws_logger.propagate = True # Allow WARNING/ERROR messages to reach root logger's handler
 
     # Replace escaped newlines with actual newlines in initial_prompt
     if args.initial_prompt:
@@ -681,7 +724,7 @@ async def data_handler(websocket):
         while True:
             message = await websocket.recv()
             if isinstance(message, bytes):
-                if debug_logging:
+                if extended_logging:
                     debug_print(f"Received audio chunk (size: {len(message)} bytes)")
                 elif log_incoming_chunks:
                     print(".", end='', flush=True)
@@ -691,7 +734,14 @@ async def data_handler(websocket):
                 metadata = json.loads(metadata_json)
                 sample_rate = metadata['sampleRate']
 
-                debug_print(f"Processing audio chunk with sample rate {sample_rate}")
+                if 'server_sent_to_stt' in metadata:
+                    stt_received_ns = time.time_ns()
+                    metadata["stt_received"] = stt_received_ns
+                    metadata["stt_received_formatted"] = format_timestamp_ns(stt_received_ns)
+                    print(f"Server received audio chunk of length {len(message)} bytes, metadata: {metadata}")
+
+                if extended_logging:
+                    debug_print(f"Processing audio chunk with sample rate {sample_rate}")
                 chunk = message[4+metadata_length:]
 
                 if writechunks:
@@ -703,10 +753,13 @@ async def data_handler(websocket):
 
                     wav_file.writeframes(chunk)
 
-                resampled_chunk = decode_and_resample(chunk, sample_rate, 16000)
-
-                debug_print(f"Resampled chunk size: {len(resampled_chunk)} bytes")
-                recorder.feed_audio(resampled_chunk)
+                if sample_rate != 16000:
+                    resampled_chunk = decode_and_resample(chunk, sample_rate, 16000)
+                    if extended_logging:
+                        debug_print(f"Resampled chunk size: {len(resampled_chunk)} bytes")
+                    recorder.feed_audio(resampled_chunk)
+                else:
+                    recorder.feed_audio(chunk)
             else:
                 print(f"{bcolors.WARNING}Received non-binary message on data connection{bcolors.ENDC}")
     except websockets.exceptions.ConnectionClosed as e:
@@ -776,6 +829,7 @@ async def main_async():
         'use_main_model_for_realtime': args.use_main_model_for_realtime,
         'spinner': False,
         'use_microphone': False,
+
         'on_realtime_transcription_update': make_callback(loop, text_detected),
         'on_recording_start': make_callback(loop, on_recording_start),
         'on_recording_stop': make_callback(loop, on_recording_stop),
@@ -785,6 +839,9 @@ async def main_async():
         'on_wakeword_detection_start': make_callback(loop, on_wakeword_detection_start),
         'on_wakeword_detection_end': make_callback(loop, on_wakeword_detection_end),
         'on_transcription_start': make_callback(loop, on_transcription_start),
+        'on_turn_detection_start': make_callback(loop, on_turn_detection_start),
+        'on_turn_detection_stop': make_callback(loop, on_turn_detection_stop),
+
         # 'on_recorded_chunk': make_callback(loop, on_recorded_chunk),
         'no_log_file': True,  # Disable logging to file
         'use_extended_logging': args.use_extended_logging,
@@ -795,6 +852,7 @@ async def main_async():
         'handle_buffer_overflow': args.handle_buffer_overflow,
         'suppress_tokens': args.suppress_tokens,
         'allowed_latency_limit': args.allowed_latency_limit,
+        'faster_whisper_vad_filter': args.faster_whisper_vad_filter,
     }
 
     try:

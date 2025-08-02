@@ -8,6 +8,12 @@
 
 *Easy-to-use, low-latency speech-to-text library for realtime applications*
 
+> ❗ **Project Status: Community-Driven**
+> 
+> This project is no longer being actively maintained by me due to time constraints. I've taken on too many projects and I have to step back. I will no longer be implementing new features or providing user support.
+>
+> I will continue to review and merge high-quality, well-written Pull Requests from the community from time to time. Your contributions are welcome and appreciated!
+
 ## New
 
 - AudioToTextRecorderClient class, which automatically starts a server if none is running and connects to it. The class shares the same interface as AudioToTextRecorder, making it easy to upgrade or switch between the two. (Work in progress, most parameters and callbacks of AudioToTextRecorder are already implemented into AudioToTextRecorderClient, but not all. Also the server can not handle concurrent (parallel) requests yet.)
@@ -24,11 +30,13 @@ It's ideal for:
 - **Voice Assistants**
 - Applications requiring **fast and precise** speech-to-text conversion
 
-https://github.com/user-attachments/assets/797e6552-27cd-41b1-a7f3-e5cbc72094f5
+https://github.com/user-attachments/assets/797e6552-27cd-41b1-a7f3-e5cbc72094f5  
+
+[CLI demo code (reproduces the video above)](tests/realtimestt_test.py)
 
 ### Updates
 
-Latest Version: v0.3.94
+Latest Version: v0.3.104
 
 See [release history](https://github.com/KoljaB/RealtimeSTT/releases).
 
@@ -475,6 +483,8 @@ When you initialize the `AudioToTextRecorder` class, you have various options to
 
 - **no_log_file** (bool, default=False): If set, the system will skip writing the debug log file, reducing disk I/O. Useful if logging to a file is not needed and performance is a priority.
 
+- **start_callback_in_new_thread** (bool, default=False): If set, the system will create a new thread for all callback functions. This can be useful if the callback function is blocking and you want to avoid blocking the realtimestt application thread. 
+
 #### Real-time Transcription Parameters
 
 > **Note**: *When enabling realtime description a GPU installation is strongly advised. Using realtime transcription may create high GPU loads.*
@@ -513,6 +523,10 @@ When you initialize the `AudioToTextRecorder` class, you have various options to
 - **min_length_of_recording** (float, default=1.0): Specifies the minimum duration in seconds that a recording session should last to ensure meaningful audio capture, preventing excessively short or fragmented recordings.
 
 - **pre_recording_buffer_duration** (float, default=0.2): The time span, in seconds, during which audio is buffered prior to formal recording. This helps counterbalancing the latency inherent in speech activity detection, ensuring no initial audio is missed.
+
+- **on_vad_start**: A callable function triggered when the system has detected the start of voice activity presence.
+
+- **on_vad_stop**: A callable function triggered when the system has detected the stop of voice activity presence.
 
 - **on_vad_detect_start**: A callable function triggered when the system starts to listen for voice activity.
 
