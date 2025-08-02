@@ -7,6 +7,11 @@ with open("README.md", "r") as fh:
 with open('requirements.txt') as f:
     requirements = f.read().splitlines()
 
+# External dependencies for LLM transcription services
+external_requirements = [
+    'litellm>=1.0.0',
+]
+
 setuptools.setup(
     name="RealtimeSTT",
     version="0.3.94",
@@ -24,6 +29,9 @@ setuptools.setup(
     ],
     python_requires='>=3.6',
     install_requires=requirements,
+    extras_require={
+        'external': external_requirements,
+    },
     keywords="real-time, audio, transcription, speech-to-text, voice-activity-detection, VAD, real-time-transcription, ambient-noise-detection, microphone-input, faster_whisper, speech-recognition, voice-assistants, audio-processing, buffered-transcription, pyaudio, ambient-noise-level, voice-deactivity",
     entry_points={
         'console_scripts': [

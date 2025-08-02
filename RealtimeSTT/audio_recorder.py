@@ -34,7 +34,7 @@ from openwakeword.model import Model
 from scipy.signal import resample
 from scipy import signal
 import signal as system_signal
-from faster_whisper import WhisperModel, BatchedInferencePipeline
+from .whisper_model import WhisperModel, BatchedInferencePipeline
 import faster_whisper
 import openwakeword
 import collections
@@ -129,10 +129,10 @@ class TranscriptionWorker:
              system_signal.signal(system_signal.SIGINT, system_signal.SIG_IGN)
              __builtins__['print'] = self.custom_print
 
-        logging.info(f"Initializing faster_whisper main transcription model {self.model_path}")
+        logging.info(f"Initializing main transcription model {self.model_path}")
 
         try:
-            model = faster_whisper.WhisperModel(
+            model = WhisperModel(
                 model_size_or_path=self.model_path,
                 device=self.device,
                 compute_type=self.compute_type,
@@ -147,7 +147,7 @@ class TranscriptionWorker:
             dummy_audio = np.zeros(16000, dtype=np.float32)
             model.transcribe(dummy_audio, language="en", beam_size=1)
         except Exception as e:
-            logging.exception(f"Error initializing main faster_whisper transcription model: {e}")
+            logging.exception(f"Error initializing main transcription model: {e}")
             raise
 
         self.ready_event.set()
